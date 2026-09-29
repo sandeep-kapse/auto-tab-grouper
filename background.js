@@ -3,6 +3,11 @@
 import { compileRules, matchCompiledRules } from "./rules.js";
 import { planGroupMerges, partitionMovableTabs } from "./groups.js";
 import { getSettings } from "./storage.js";
+import { initHighlight } from "./highlight.js";
+
+// Active tab favicon marker + active group color highlight (merged from the
+// standalone "Active_(Tab+Group)_Highlight" extension).
+initHighlight();
 
 // --- Custom Logger ---
 let debugMode = false;

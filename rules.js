@@ -79,15 +79,31 @@ export function compileRules(domainGroups) {
         invalid.push({ key, error });
         continue;
       }
-      rules.push({ key, info, order, isRegex: true, regex, suffix: null });
+      // Pattern length is a pragmatic proxy for specificity: a broad
+      // catch-all like `https://github.com/e.*` is short, while a narrower
+      // rule like `https://github.com/whamcloud/ansible.*` that is meant to
+      // take priority over it is longer. This lets a "catch the rest" regex
+      // coexist with more specific regexes for the same site regardless of
+      // which one was declared first.
+      rules.push({
+        key,
+        info,
+        order,
+        isRegex: true,
+        regex,
+        suffix: null,
+        specificity: key.length,
+      });
     } else {
+      const suffix = ruleSuffix(key);
       rules.push({
         key,
         info,
         order,
         isRegex: false,
         regex: null,
-        suffix: ruleSuffix(key),
+        suffix,
+        specificity: suffix.length,
       });
     }
   }
@@ -117,9 +133,11 @@ function scoreRule(rule, url, domain) {
  * Finds the most specific matching rule.
  *
  * Precedence: an exact hostname match beats a suffix match, a suffix match
- * beats a regex, a longer suffix beats a shorter one, and insertion order is
- * only the final tie-break. This is what lets a `mail.google.com` rule win
- * over a `*.google.com` rule that was added first.
+ * beats a regex. Within a tier, a more specific rule wins: for domain rules
+ * that means a longer suffix (so `mail.google.com` beats `*.google.com`);
+ * for regex rules it means a longer pattern (so
+ * `https://github.com/whamcloud/ansible.*` beats a broad catch-all like
+ * `https://github.com/e.*`). Insertion order is only the final tie-break.
  *
  * @param {string} url
  * @param {Array<object>} compiledRules - from `compileRules().rules`
@@ -138,7 +156,7 @@ export function matchCompiledRules(url, compiledRules) {
       best === null ||
       score > bestScore ||
       (score === bestScore &&
-        (rule.suffix?.length ?? 0) > (best.suffix?.length ?? 0))
+        (rule.specificity ?? 0) > (best.specificity ?? 0))
     ) {
       best = rule;
       bestScore = score;

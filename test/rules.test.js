@@ -211,12 +211,32 @@ test("a chrome-extension URL does not match a domain rule", () => {
   assert.equal(matchRule("chrome-extension://abcdef/popup.html", rules), null);
 });
 
-test("between two matching regexes the first declared wins", () => {
+test("between two matching regexes the longer (more specific) one wins", () => {
   const rules = {
-    "^https://a\\.": rule("First", { isRegex: true }),
-    "^https://a\\.example": rule("Second", { isRegex: true }),
+    "^https://a\\.": rule("Broad", { isRegex: true }),
+    "^https://a\\.example": rule("Narrow", { isRegex: true }),
   };
-  assert.equal(matchRule("https://a.example.com/", rules).info.title, "First");
+  assert.equal(
+    matchRule("https://a.example.com/", rules).info.title,
+    "Narrow"
+  );
+});
+
+test("a broad catch-all regex loses to a narrower regex regardless of order", () => {
+  const rules = {
+    "https://github.com/e.*": rule("github others", { isRegex: true }),
+    "https://github.com/whamcloud/ansible.*": rule("EXAScaler github", {
+      isRegex: true,
+    }),
+  };
+  assert.equal(
+    matchRule("https://github.com/whamcloud/ansible/pulls", rules).info.title,
+    "EXAScaler github"
+  );
+  assert.equal(
+    matchRule("https://github.com/example/repo", rules).info.title,
+    "github others"
+  );
 });
 
 test("a regex is matched against the whole URL, not just the host", () => {

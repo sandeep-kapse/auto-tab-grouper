@@ -155,33 +155,86 @@ async function updateGroupColors(tab) {
   }
 }
 
-export function initHighlight() {
-  chrome.tabs.onActivated.addListener(async (activeInfo) => {
-    const prevTabId = await getMarkedTabId();
-    if (prevTabId !== null && prevTabId !== activeInfo.tabId) {
-      await applyUnmark(prevTabId);
-    }
-    await applyMark(activeInfo.tabId);
-    await setMarkedTabId(activeInfo.tabId);
+// In-memory mirror of "the tab that should currently be highlighted",
+// updated synchronously the instant a tab is activated. This is the single
+// source of truth for every check below. We deliberately do NOT serialize
+// activations behind one another (a strict queue backs up under load, e.g.
+// right after a browser restart when many tabs are competing for CPU and
+// each scripting call gets slower, which can stall visible highlighting
+// indefinitely). Instead, every async step re-checks this value after each
+// await and self-corrects if it's gone stale, so correctness never depends
+// on which of two concurrent activations happens to finish first.
+let currentActiveTabId = null;
 
-    try {
-      const tab = await chrome.tabs.get(activeInfo.tabId);
-      await updateGroupColors(tab);
-    } catch (err) {
-      if (!/No tab with id/.test(err.message)) {
-        console.error("[Highlight] Activation handler error:", err.message);
-      }
+async function highlightActiveTab(tabId) {
+  currentActiveTabId = tabId;
+
+  // 1) Group color first: this is a plain tab-group property update, not
+  // dependent on page content/load state, so it applies instantly and
+  // reliably regardless of whether the tab has finished loading.
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (currentActiveTabId !== tabId) return; // superseded already
+    await updateGroupColors(tab);
+  } catch (err) {
+    if (!/No tab with id/.test(err.message)) {
+      console.error("[Highlight] Group highlight error:", err.message);
     }
+  }
+
+  // 2) Favicon marker second: this depends on injecting into the page, so
+  // it's slower and can fail while the page is still loading. `applyMark`
+  // swallows injection errors for restricted pages; `onUpdated` below
+  // re-applies it once the page finishes loading.
+  await applyMark(tabId);
+
+  if (currentActiveTabId !== tabId) {
+    // A newer activation happened while applyMark() was in flight. Undo
+    // immediately instead of leaving a stale marker behind - we can't rely
+    // on the newer task's unmark call having "already" run, since ordering
+    // between concurrent tasks isn't guaranteed.
+    applyUnmark(tabId);
+    return;
+  }
+
+  // Still current: safe to unmark whatever was previously marked. Read the
+  // previous marked tab from storage rather than an in-memory variable -
+  // `chrome.storage.session` survives service worker suspension (e.g. after
+  // the browser sits idle and Chrome tears down the worker), so this always
+  // finds the tab that actually still has the marker applied, even on a
+  // freshly restarted worker with no in-memory history.
+  const prevTabId = await getMarkedTabId();
+  if (currentActiveTabId !== tabId) return; // superseded while reading storage
+  if (prevTabId !== null && prevTabId !== tabId) {
+    applyUnmark(prevTabId);
+  }
+
+  await setMarkedTabId(tabId);
+}
+
+export function initHighlight() {
+  // Seed from storage in case the service worker was restarted; doesn't
+  // block anything, just avoids losing track of the marked tab for the
+  // `onUpdated` reload-remark filter below.
+  getMarkedTabId().then((id) => {
+    if (currentActiveTabId === null) currentActiveTabId = id;
+  });
+
+  chrome.tabs.onActivated.addListener((activeInfo) => {
+    highlightActiveTab(activeInfo.tabId);
   });
 
   // A page reload/navigation gives the tab a fresh JS context, wiping the
   // marker and observer we injected. Re-apply once it finishes loading, if
-  // it's still the active tab.
+  // it's still the active tab. The cheap `currentActiveTabId` check filters
+  // out the (usually many) unrelated tabs finishing at the same time with
+  // zero async cost, so this never queues work for tabs you're not on.
   chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
     if (changeInfo.status !== "complete") return;
-    const markedTabId = await getMarkedTabId();
-    if (markedTabId === tabId) {
-      await applyMark(tabId);
+    if (tabId !== currentActiveTabId) return;
+    await applyMark(tabId);
+    if (currentActiveTabId !== tabId) {
+      applyUnmark(tabId);
     }
   });
 }

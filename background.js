@@ -3,11 +3,39 @@
 import { compileRules, matchCompiledRules } from "./rules.js";
 import { planGroupMerges, partitionMovableTabs } from "./groups.js";
 import { getSettings } from "./storage.js";
-import { initHighlight } from "./highlight.js";
+import { initHighlight, getDebugLogText } from "./highlight.js";
 
 // Active tab favicon marker + active group color highlight (merged from the
 // standalone "Active_(Tab+Group)_Highlight" extension).
 initHighlight();
+
+// --- TEMPORARY debug log dump ---
+// Periodically writes highlight.js's in-memory debug log to a fixed file in
+// the Downloads folder so it can be inspected without keeping the service
+// worker's DevTools console open (which itself can prevent the suspension
+// scenarios we're trying to diagnose). Remove once the discarded-tab marker
+// delay is root-caused.
+const DEBUG_LOG_ALARM = "highlightDebugLogDump";
+chrome.alarms.create(DEBUG_LOG_ALARM, { periodInMinutes: 0.5 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== DEBUG_LOG_ALARM) return;
+  const text = getDebugLogText();
+  if (!text) return;
+  const dataUrl = `data:text/plain;base64,${btoa(unescape(encodeURIComponent(text)))}`;
+  chrome.downloads.download(
+    {
+      url: dataUrl,
+      filename: "auto-tab-grouper-debug.log",
+      conflictAction: "overwrite",
+      saveAs: false,
+    },
+    () => {
+      if (chrome.runtime.lastError) {
+        console.error("[Highlight] Debug log dump failed:", chrome.runtime.lastError.message);
+      }
+    }
+  );
+});
 
 // --- Custom Logger ---
 let debugMode = false;

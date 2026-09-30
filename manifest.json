@@ -4,7 +4,7 @@
   "version": "1.3.0",
   "description": "Automatically groups tabs by domain (supports wildcards, configurable via options/popup).",
   "minimum_chrome_version": "111",
-  "permissions": ["tabs", "tabGroups", "storage", "scripting"],
+  "permissions": ["tabs", "tabGroups", "storage", "scripting", "downloads", "alarms"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js",

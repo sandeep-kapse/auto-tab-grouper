@@ -9,23 +9,10 @@
 // 2. Active group color highlight: the tab group containing the active
 //    tab is colored green, every other group is colored grey.
 
+import { logEvent } from "./debug-log.js";
+
 const MARK_COLOR = "#e60000"; // red
 const ACTIVE_TAB_KEY = "faviconHighlightTabId";
-
-// TEMPORARY debug log buffer for diagnosing the discarded/lazy-loaded tab
-// marker delay. Bounded ring buffer so it can't grow unbounded. Exposed via
-// getDebugLogText() so background.js can periodically dump it to a file.
-const DEBUG_LOG_MAX = 500;
-const debugLog = [];
-function logEvent(...args) {
-  const line = `${new Date().toISOString()} ${args.map(String).join(" ")}`;
-  debugLog.push(line);
-  if (debugLog.length > DEBUG_LOG_MAX) debugLog.shift();
-  console.log("[Highlight]", ...args);
-}
-export function getDebugLogText() {
-  return debugLog.join("\n");
-}
 
 async function getMarkedTabId() {
   const { [ACTIVE_TAB_KEY]: id } = await chrome.storage.session.get(ACTIVE_TAB_KEY);
